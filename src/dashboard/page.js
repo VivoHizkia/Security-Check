@@ -48,7 +48,7 @@ button.danger{color:var(--critical)}
 table{width:100%;border-collapse:collapse;background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden}
 th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}th{font-size:12px;color:var(--muted);font-weight:600;background:var(--panel2)}
 tr:last-child td{border-bottom:none}tr.click{cursor:pointer}tr.click:hover td{background:var(--panel2)}
-.auth{font-size:12px;font-weight:600;white-space:nowrap}td.mono{white-space:nowrap}.a-required{color:var(--ok)}.a-likely{color:var(--ok)}.a-none{color:var(--critical)}.a-unknown{color:var(--medium)}
+.auth{font-size:12px;font-weight:600;white-space:nowrap}td.mono{white-space:nowrap}.a-required{color:var(--ok)}.a-likely{color:var(--ok)}.a-none{color:var(--critical)}.a-middleware{color:var(--low)}.a-unknown{color:var(--medium)}
 .diff{display:grid;grid-template-columns:1fr 1fr;gap:12px}.diff ul{margin:6px 0 0;padding-left:18px}.diff li{margin:3px 0}
 .chart{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
 .chart svg{display:block;width:100%;height:auto;max-height:160px}
@@ -123,14 +123,14 @@ function tabSurface(r) {
   const s = r.surface;
   if (!s || !s.endpoints.length) return '<p class="muted">No endpoints found (supports Laravel routes, Next.js route handlers, pages/api, Server Actions and Express).</p>';
   const count = (a) => s.endpoints.filter((e) => e.auth === a).length;
-  const label = { required: 'auth required', likely: 'auth check found', none: 'no auth', unknown: 'no auth check found' };
+  const label = { required: 'auth required', likely: 'auth check found', middleware: 'middleware auth', none: 'no auth', unknown: 'no auth check found' };
   return '<div class="chips mb12">' +
-    ['none', 'unknown', 'likely', 'required'].filter(count).map((a) => '<span class="chip"><span class="auth a-' + a + '">' + count(a) + '</span> ' + label[a] + '</span>').join('') +
+    ['none', 'unknown', 'middleware', 'likely', 'required'].filter(count).map((a) => '<span class="chip"><span class="auth a-' + a + '">' + count(a) + '</span> ' + label[a] + '</span>').join('') +
     '</div>' + s.notes.map((n) => '<p class="banner">' + esc(n) + '</p>').join('') +
     '<div class="tablewrap"><table><thead><tr><th>Method</th><th>Endpoint</th><th>Protection</th><th>Source</th></tr></thead><tbody>' +
     s.endpoints.map((e) => '<tr><td class="mono">' + esc(e.method) + '</td><td class="mono">' + esc(e.path) + (e.admin ? ' <span class="chip">admin</span>' : '') +
       '</td><td><span class="auth a-' + esc(e.auth) + '">' + esc(label[e.auth]) + '</span></td><td class="mono muted">' + esc(e.file + ':' + e.line) + '</td></tr>').join('') +
-    '</tbody></table></div><p class="muted small">"No auth check found" means the handler itself does not call an auth helper. It may still be guarded by middleware, so treat it as a list to review, not a verdict.</p>';
+    '</tbody></table></div><p class="muted small">"No auth check found" means neither the handler nor middleware tameng can see calls an auth helper. "Middleware auth" means Next.js middleware with an auth check matches the path. Treat this as a list to review, not a verdict.</p>';
 }
 
 function tabHistory() {

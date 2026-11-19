@@ -83,6 +83,44 @@ test('pnpm-lock.yaml v5, v6 and v9, and bun.lock', () => {
   assert.deepEqual(parseBunLock(bun).map((p) => `${p.name}@${p.version}`), ['@types/node@22.9.0', 'hono@4.6.10', 'app@workspace:.']);
 });
 
+test('pnpm v9 and bun: transitive dev-only packages are dev, shared ones stay production', () => {
+  const v9 = [
+    "lockfileVersion: '9.0'", '', 'importers:', '', '  .:',
+    '    dependencies:', '      express:', '        specifier: ^4.19.0', '        version: 4.19.2',
+    '    devDependencies:', '      eslint:', '        specifier: ^9.0.0', '        version: 9.1.0', '',
+    'packages:', '',
+    '  express@4.19.2:', '    resolution: {integrity: a}', '',
+    '  debug@2.6.9:', '    resolution: {integrity: b}', '',
+    '  eslint@9.1.0:', '    resolution: {integrity: c}', '',
+    '  minimatch@3.1.2:', '    resolution: {integrity: d}', '',
+    '  string-width@4.2.3:', '    resolution: {integrity: e}', '',
+    '  orphan@1.0.0:', '    resolution: {integrity: f}', '',
+    'snapshots:', '',
+    '  express@4.19.2:', '    dependencies:', '      debug: 2.6.9', '',
+    '  eslint@9.1.0(jiti@1.0.0):', '    dependencies:', '      debug: 2.6.9', '      minimatch: 3.1.2', "      string-width-cjs: string-width@4.2.3", '',
+  ].join('\n');
+  assert.deepEqual(Object.fromEntries(parsePnpmLock(v9).map((p) => [p.name, p.dev])), {
+    express: false, debug: false, eslint: true, minimatch: true, 'string-width': true, orphan: false,
+  }, 'debug is shared with production; orphan is unreachable so it stays production');
+
+  const bun = JSON.stringify({
+    lockfileVersion: 1,
+    workspaces: { '': { name: 'app', dependencies: { hono: '^4' }, devDependencies: { vitest: '^2' } } },
+    packages: {
+      hono: ['hono@4.6.10', '', {}, 'sha'],
+      vitest: ['vitest@2.1.0', '', { dependencies: { chai: '^5', 'pretty-format': '^29' } }, 'sha'],
+      chai: ['chai@5.1.0', '', {}, 'sha'],
+      'pretty-format': ['pretty-format@29.7.0', '', { dependencies: { 'react-is': '^18' } }, 'sha'],
+      'react-is': ['react-is@18.3.1', '', {}, 'sha'],
+      'pretty-format/react-is': ['react-is@17.0.2', '', {}, 'sha'],
+    },
+  });
+  assert.deepEqual(parseBunLock(bun).map((p) => `${p.name}@${p.version}:${p.dev}`), [
+    'hono@4.6.10:false', 'vitest@2.1.0:true', 'chai@5.1.0:true', 'pretty-format@29.7.0:true',
+    'react-is@18.3.1:false', 'react-is@17.0.2:true',
+  ], 'nested key "pretty-format/react-is" wins over the hoisted one');
+});
+
 test('compareVersions follows semver precedence', () => {
   const sign = (a, b) => Math.sign(compareVersions(a, b));
   assert.equal(sign('2.0.0', '2.0.0-rc.1'), 1, 'release is newer than its pre-release');

@@ -48,19 +48,52 @@ export function parseYarnLock(text) {
 const unquote = (s) => s.trim().replace(/^(['"])(.*)\1$/, '$2');
 
 /**
- * pnpm-lock.yaml, versions 5 to 9, without a YAML library: only the `packages:` keys
- * (and, for v9, the importers' direct dependencies) are needed.
+ * Marks packages reachable only from dev roots as dev. Anything reachable from a production root,
+ * or not reachable at all (incomplete graph), stays production: the cautious side.
+ */
+function markDevByReachability(pkgs, edges, prodRoots, devRoots) {
+  const walk = (roots) => {
+    const seen = new Set();
+    const stack = [...roots];
+    while (stack.length) {
+      const k = stack.pop();
+      if (seen.has(k)) continue;
+      seen.add(k);
+      for (const next of edges.get(k) || []) stack.push(next);
+    }
+    return seen;
+  };
+  const prod = walk(prodRoots);
+  const dev = walk(devRoots);
+  for (const p of pkgs) p.dev = dev.has(`${p.name}@${p.version}`) && !prod.has(`${p.name}@${p.version}`);
+}
+
+const stripPeers = (v) => unquote(v).replace(/\(.*$/, '');
+/** "15.0.3(react@19)" under name "next" → next@15.0.3; aliases like "string-width@4.2.3" keep their own name. */
+function pnpmRef(name, value) {
+  const v = stripPeers(value);
+  const alias = v.match(/^(@?[^@]+)@(\d.*)$/);
+  return alias ? `${alias[1]}@${alias[2]}` : /^\d/.test(v) ? `${name}@${v}` : null;
+}
+
+/**
+ * pnpm-lock.yaml, versions 5 to 9, without a YAML library.
  *   v5: /@scope/name/1.2.3_peer@1.0.0:   (dev: true inside)
  *   v6: /@scope/name@1.2.3(peer@1.0.0):  (dev: true inside)
- *   v9: '@scope/name@1.2.3':            (dev status only for direct deps, from importers)
+ *   v9: '@scope/name@1.2.3':            (dev status derived from importers + the snapshots graph)
  */
 export function parsePnpmLock(text) {
   const lines = text.split(/\r?\n/);
   const major = Number(unquote(lines.find((l) => l.startsWith('lockfileVersion:'))?.split(':')[1] ?? '9').split('.')[0]) || 9;
   const out = [];
-  const devOnly = new Map(); // v9: name -> true when every importer lists it under devDependencies
+  const prodRoots = [];
+  const devRoots = [];
+  const edges = new Map();
   let section = null;
   let importerGroup = null;
+  let importerDep = null;
+  let snapshot = null;
+  let snapshotGroup = null;
   let current = null;
 
   for (const line of lines) {
@@ -70,10 +103,22 @@ export function parsePnpmLock(text) {
 
     if (section === 'importers') {
       if (indent === 4) importerGroup = line.trim().replace(/:$/, '');
-      else if (indent === 6 && /^(dependencies|devDependencies|optionalDependencies)$/.test(importerGroup)) {
-        const name = unquote(line.trim().replace(/:$/, '').replace(/:\s.*$/, ''));
-        const isDev = importerGroup === 'devDependencies';
-        devOnly.set(name, (devOnly.get(name) ?? true) && isDev);
+      else if (indent === 6) importerDep = unquote(line.trim().replace(/:.*$/, ''));
+      else if (indent === 8 && importerDep && /^version:/.test(line.trim())) {
+        const ref = pnpmRef(importerDep, line.trim().slice('version:'.length));
+        if (ref) (importerGroup === 'devDependencies' ? devRoots : prodRoots).push(ref);
+      }
+      continue;
+    }
+    if (section === 'snapshots') {
+      if (indent === 2) {
+        snapshot = stripPeers(line.trim().replace(/:$/, ''));
+        snapshotGroup = null;
+      } else if (indent === 4) snapshotGroup = line.trim().replace(/:$/, '');
+      else if (indent === 6 && snapshot && /^(dependencies|optionalDependencies)$/.test(snapshotGroup)) {
+        const m = line.trim().match(/^(['"]?[^'":]+['"]?):\s*(.+)$/);
+        const ref = m && pnpmRef(unquote(m[1]), m[2]);
+        if (ref) edges.set(snapshot, [...(edges.get(snapshot) || []), ref]);
       }
       continue;
     }
@@ -100,19 +145,55 @@ export function parsePnpmLock(text) {
       current.dev = true;
     }
   }
-  if (major >= 9) for (const p of out) if (devOnly.get(p.name)) p.dev = true;
+  if (major >= 9 && (prodRoots.length || devRoots.length)) markDevByReachability(out, edges, prodRoots, devRoots);
   return out;
 }
 
-/** bun.lock (text format, Bun ≥ 1.2): JSONC with "packages": { key: ["name@version", ...] }. */
+/** "next/postcss" → ["next", "postcss"]; "@babel/core/semver" → ["@babel/core", "semver"]. */
+function splitBunKey(key) {
+  const parts = key.split('/');
+  const out = [];
+  for (let i = 0; i < parts.length; i++) out.push(parts[i].startsWith('@') ? `${parts[i]}/${parts[++i]}` : parts[i]);
+  return out;
+}
+
+/**
+ * bun.lock (text format, Bun ≥ 1.2): JSONC with "packages": { key: ["name@version", registry, { dependencies }, integrity] }.
+ * Keys are hoisting paths ("next/postcss" = the postcss nested under next), resolved like node_modules lookups.
+ */
 export function parseBunLock(text) {
   const json = JSON.parse(text.replace(/,(\s*[}\]])/g, '$1'));
+  const packages = json.packages || {};
   const out = [];
-  for (const entry of Object.values(json.packages || {})) {
+  const refOf = new Map(); // key → "name@version"
+  for (const [key, entry] of Object.entries(packages)) {
     const spec = Array.isArray(entry) ? entry[0] : null;
     const at = typeof spec === 'string' ? spec.lastIndexOf('@') : -1;
-    if (at > 0) out.push({ ecosystem: 'npm', name: spec.slice(0, at), version: spec.slice(at + 1), dev: false });
+    if (at <= 0) continue;
+    out.push({ ecosystem: 'npm', name: spec.slice(0, at), version: spec.slice(at + 1), dev: false });
+    refOf.set(key, spec);
   }
+  const resolve = (fromKey, name) => {
+    const path = fromKey ? splitBunKey(fromKey) : [];
+    for (let i = path.length; i >= 0; i--) {
+      const ref = refOf.get([...path.slice(0, i), name].join('/'));
+      if (ref) return ref;
+    }
+    return null;
+  };
+  const edges = new Map();
+  for (const [key, entry] of Object.entries(packages)) {
+    const meta = Array.isArray(entry) ? entry.find((x) => x && typeof x === 'object' && !Array.isArray(x)) : null;
+    const deps = Object.keys({ ...meta?.dependencies, ...meta?.optionalDependencies });
+    if (refOf.has(key)) edges.set(refOf.get(key), deps.map((d) => resolve(key, d)).filter(Boolean));
+  }
+  const prodRoots = [];
+  const devRoots = [];
+  for (const ws of Object.values(json.workspaces || {})) {
+    for (const d of Object.keys({ ...ws.dependencies, ...ws.optionalDependencies })) prodRoots.push(resolve('', d));
+    for (const d of Object.keys(ws.devDependencies || {})) devRoots.push(resolve('', d));
+  }
+  if (prodRoots.length || devRoots.length) markDevByReachability(out, edges, prodRoots.filter(Boolean), devRoots.filter(Boolean));
   return out;
 }
 
