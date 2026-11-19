@@ -1,6 +1,6 @@
 import { finding } from '../findings.js';
 import { isTestPath, snippet } from '../files.js';
-import { analyzeTaint, SINKS } from '../taint.js';
+import { analyzeProject, SINKS } from '../taint.js';
 
 const SCANNER = 'code';
 
@@ -102,6 +102,7 @@ const RULES = [
 
 export function scanCode(files) {
   const findings = [];
+  const taint = projectTaint(files);
   for (const file of files) {
     if (isTestPath(file.rel)) continue;
     const rules = RULES.filter((r) => r.lang.test(file.name));
@@ -123,19 +124,23 @@ export function scanCode(files) {
       }
     });
 
-    if (JS.test(file.name) && !lines.some((l) => l.length > 5000)) findings.push(...taintFindings(file, lines, flagged));
+    if (taint.has(file.rel)) findings.push(...taintFindings(file, lines, flagged, taint.get(file.rel)));
   }
   return findings;
 }
 
-/** Multi-line flows: request data assigned to a variable on one line and used in a sink on another. */
-function taintFindings(file, lines, flagged) {
-  let results;
+/** Taint results for every JS/TS source file, analysed together so calls across files resolve. */
+function projectTaint(files) {
+  const js = files.filter((f) => JS.test(f.name) && !isTestPath(f.rel) && !f.text.split('\n').some((l) => l.length > 5000));
   try {
-    results = analyzeTaint(file.text, { nextAppFile: /(?:^|\/)(?:src\/)?app\//.test(file.rel) });
+    return analyzeProject(js.map((f) => ({ rel: f.rel, text: f.text, nextAppFile: /(?:^|\/)(?:src\/)?app\//.test(f.rel) })));
   } catch {
-    return []; // unusual syntax: the line-based rules above still ran
+    return new Map(); // unusual syntax: the line-based rules still ran
   }
+}
+
+/** Flows found by taint tracking: across lines, through helpers, across files. */
+function taintFindings(file, lines, flagged, results) {
   const out = [];
   for (const r of results) {
     const sink = SINKS[r.sink];
