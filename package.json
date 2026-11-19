@@ -1,0 +1,31 @@
+{
+  "name": "tameng",
+  "version": "0.1.0",
+  "description": "Security self-scanner for your own web apps: headers, leaked secrets, misconfig, risky code and vulnerable dependencies.",
+  "type": "module",
+  "bin": {
+    "tameng": "bin/tameng.js"
+  },
+  "files": [
+    "bin",
+    "src"
+  ],
+  "scripts": {
+    "test": "node --test",
+    "scan": "node bin/tameng.js"
+  },
+  "engines": {
+    "node": ">=18.17"
+  },
+  "keywords": [
+    "security",
+    "scanner",
+    "secrets",
+    "headers",
+    "laravel",
+    "express",
+    "nextjs",
+    "osv"
+  ],
+  "license": "MIT"
+}
