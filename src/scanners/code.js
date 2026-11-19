@@ -1,5 +1,6 @@
 import { finding } from '../findings.js';
 import { isTestPath, snippet } from '../files.js';
+import { analyzeTaint, SINKS } from '../taint.js';
 
 const SCANNER = 'code';
 
@@ -107,18 +108,44 @@ export function scanCode(files) {
     if (!rules.length) continue;
 
     const lines = file.text.split(/\r?\n/);
+    const flagged = new Set(); // "id:line" already reported by a pattern rule
     lines.forEach((line, i) => {
       if (line.length > 2000 || line.includes('tameng-ignore')) return;
       const trimmed = line.trim();
       if (trimmed.startsWith('//') || trimmed.startsWith('#') || trimmed.startsWith('*')) return;
       for (const rule of rules) {
         if (!rule.re.test(line)) continue;
+        flagged.add(`${rule.id}:${i + 1}`);
         findings.push(finding({
           id: rule.id, scanner: SCANNER, severity: rule.severity, title: rule.title,
           location: `${file.rel}:${i + 1}`, detail: snippet(line), fix: rule.fix,
         }));
       }
     });
+
+    if (JS.test(file.name) && !lines.some((l) => l.length > 5000)) findings.push(...taintFindings(file, lines, flagged));
   }
   return findings;
+}
+
+/** Multi-line flows: request data assigned to a variable on one line and used in a sink on another. */
+function taintFindings(file, lines, flagged) {
+  let results;
+  try {
+    results = analyzeTaint(file.text, { nextAppFile: /(?:^|\/)(?:src\/)?app\//.test(file.rel) });
+  } catch {
+    return []; // unusual syntax: the line-based rules above still ran
+  }
+  const out = [];
+  for (const r of results) {
+    const sink = SINKS[r.sink];
+    const line = lines[r.line - 1] ?? '';
+    if (line.includes('tameng-ignore') || flagged.has(`${sink.id}:${r.line}`)) continue;
+    flagged.add(`${sink.id}:${r.line}`);
+    out.push(finding({
+      id: sink.id, scanner: SCANNER, severity: sink.severity, title: sink.title,
+      location: `${file.rel}:${r.line}`, detail: `${snippet(line)}  ·  flow: ${r.flow}`, fix: sink.fix,
+    }));
+  }
+  return out;
 }
