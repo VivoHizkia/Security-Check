@@ -12,6 +12,7 @@
   ],
   "scripts": {
     "test": "node --test",
+    "test:compat": "npx -y node@18 --test && npx -y node@20 --test && npx -y node@22 --test",
     "scan": "node bin/tameng.js"
   },
   "engines": {

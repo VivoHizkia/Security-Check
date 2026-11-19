@@ -162,7 +162,8 @@ Every scan starts at 100. Each finding takes points off: critical âˆ’25, high âˆ
 ## Development
 
 ```bash
-npm test     # node:test, no dependencies; fixtures are generated at runtime
+npm test              # node:test, no dependencies; fixtures are generated at runtime
+npm run test:compat   # the same suite on Node 18, 20 and 22 (downloads them through npx)
 ```
 
 The project layout:
