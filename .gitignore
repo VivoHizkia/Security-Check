@@ -1,3 +1,8 @@
+# Local-only: Claude Code instructions and CI config are kept out of the public repo
+.claude/
+.github/
+CLAUDE.md
+
 node_modules/
 *-report.html
 .env
