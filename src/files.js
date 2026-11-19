@@ -140,6 +140,30 @@ export function createIgnoreMatcher(gitignoreText) {
   };
 }
 
+/**
+ * True when the file starts with the given directive ('use server', 'use client') after any
+ * comments and whitespace. A plain loop on purpose: the equivalent regex backtracks exponentially
+ * on bundles that open with hundreds of comment lines.
+ */
+export function hasDirective(text, directive) {
+  let i = 0;
+  for (;;) {
+    while (i < text.length && /\s/.test(text[i])) i++;
+    if (text.startsWith('//', i)) {
+      const nl = text.indexOf('\n', i);
+      if (nl === -1) return false;
+      i = nl + 1;
+    } else if (text.startsWith('/*', i)) {
+      const end = text.indexOf('*/', i + 2);
+      if (end === -1) return false;
+      i = end + 2;
+    } else {
+      break;
+    }
+  }
+  return text.startsWith(`'${directive}'`, i) || text.startsWith(`"${directive}"`, i);
+}
+
 export function lineOf(text, index) {
   let line = 1;
   for (let i = 0; i < index && i < text.length; i++) if (text.charCodeAt(i) === 10) line++;

@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { isTestPath, lineOf } from './files.js';
+import { hasDirective, isTestPath, lineOf } from './files.js';
 import { routesWithProtection } from './scanners/laravel.js';
 
 // Attack-surface inventory of the scanned project's own code: every endpoint a visitor can reach,
@@ -44,8 +44,7 @@ function nextPagesApi(file) {
 
 /** Server Actions are POST endpoints anyone can call, even if no form on the site uses them. */
 function serverActions(file) {
-  const head = file.text.replace(/^(?:\s*(?:\/\/[^\n]*|\/\*[\s\S]*?\*\/))*\s*/, '');
-  if (!/^['"]use server['"]/.test(head)) return [];
+  if (!hasDirective(file.text, 'use server')) return [];
   const out = [];
   for (const m of file.text.matchAll(/export\s+(?:async\s+function\s+(\w+)|const\s+(\w+)\s*=\s*async\b)/g)) {
     const name = m[1] || m[2];

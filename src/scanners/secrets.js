@@ -31,7 +31,8 @@ const RULES = [
   { id: 'jwt', severity: 'medium', title: 'Hard-coded JWT', re: /\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g,
     fix: 'Do not ship long-lived tokens in code; issue them at runtime.' },
   { id: 'hardcoded-credential', severity: 'medium', title: 'Hard-coded credential',
-    re: /(['"]?)([A-Za-z0-9_.-]*(?:password|passwd|pwd|secret|api[_-]?key|apikey|access[_-]?token|auth[_-]?token|client[_-]?secret|private[_-]?key)[A-Za-z0-9_.-]*)\1\s*(?:=>|:|=)\s*(['"`])([^'"`\s]{8,})\3/gi,
+    // Name parts are bounded ({0,40}) and anchored: unbounded [..]* on both sides of the keyword backtracks cubically.
+    re: /(['"]?)((?<![A-Za-z0-9_.-])[A-Za-z0-9_.-]{0,40}?(?:password|passwd|pwd|secret|api[_-]?key|apikey|access[_-]?token|auth[_-]?token|client[_-]?secret|private[_-]?key)[A-Za-z0-9_.-]{0,40})\1\s{0,10}(?:=>|:|=)\s{0,10}(['"`])([^'"`\s]{8,500})\3/gi,
     valueGroup: 4, fix: 'Read the value from an environment variable or secret manager.' },
 ];
 

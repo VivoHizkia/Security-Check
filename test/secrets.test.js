@@ -50,6 +50,19 @@ test('ignores placeholders, env lookups and tameng-ignore lines', async () => {
   }
 });
 
+test('hard-coded credential rule stays fast on pathological lines', async () => {
+  const line = 'password'.repeat(240); // used to take about a second per line (cubic backtracking)
+  const p = await makeProject({ 'src/dump.js': `${line}\n`.repeat(20) });
+  try {
+    const { files } = await collectFiles(p.root);
+    const t0 = Date.now();
+    await scanSecrets(p.root, files);
+    assert.ok(Date.now() - t0 < 1000, `took ${Date.now() - t0} ms`);
+  } finally {
+    await p.cleanup();
+  }
+});
+
 test('flags real-looking values in .env.example', async () => {
   const p = await makeProject({ '.env.example': 'MAILGUN_SECRET=key-9f8e7d6c5b4a39281716\n' });
   try {
