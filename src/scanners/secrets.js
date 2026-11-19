@@ -73,6 +73,7 @@ export async function scanSecrets(root, files) {
             if (PLACEHOLDER.test(value) || value.toLowerCase() === m[2].toLowerCase()) continue;
             if (/^[a-z]+(?:[._-][a-z]+)*$/.test(value) && value.length < 16) continue; // looks like an identifier / config name
             if (/^[A-Z0-9_]+$/.test(value)) continue; // probably the NAME of an env var
+            if (/^\\{0,2}(?:[A-Z][A-Za-z0-9_]*\\{1,2})+[A-Z][A-Za-z0-9_]*$/.test(value)) continue; // a PHP class name: 'auth.password' => 'Illuminate\\…\\Provider'
             if (/\?\s*$/.test(line.slice(0, m.index))) continue; // ternary branch (cond ? "new-password" : "current-password"), not key: value
           }
           const key = `${rule.id}:${value}`;

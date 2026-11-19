@@ -40,6 +40,8 @@ test('ignores placeholders, env lookups and tameng-ignore lines', async () => {
       '// mongodb://<username>:<password>@cluster0.example.net/db',
     ].join('\n'),
     'src/AuthForm.tsx': '<input autoComplete={signup ? "new-password" : "current-password"} />\n',
+    'config/app.php': "<?php return ['auth.password' => 'Illuminate\\\\Auth\\\\Passwords\\\\PasswordResetServiceProvider', 'secret' => 'App\\\\Support\\\\SecretStore'];\n",
+    'bootstrap/cache/config.php': `<?php return ['k' => '${fake.aws()}'];\n`,
     '.env.example': 'APP_KEY=\nDB_PASSWORD=secret\nSTRIPE_SECRET=sk_test_xxx\n',
   });
   try {

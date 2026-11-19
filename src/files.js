@@ -51,7 +51,8 @@ export async function collectFiles(root) {
       const rel = path.relative(root, full).split(path.sep).join('/');
       if (userIgnored(rel)) continue;
       if (entry.isDirectory()) {
-        if (!IGNORED_DIRS.has(entry.name)) stack.push(full);
+        // bootstrap/cache holds files Laravel generates (config, routes, services); not source
+        if (!IGNORED_DIRS.has(entry.name) && !/(?:^|\/)bootstrap\/cache$/.test(rel)) stack.push(full);
         continue;
       }
       if (!entry.isFile()) continue;
