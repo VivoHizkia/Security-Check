@@ -114,6 +114,17 @@ test('NoSQL injection, path traversal, SSRF, express.static and PHP file inclusi
   assert.deepEqual(at('php-file-from-request'), ['public/page.php:4']);
 });
 
+test('Blade {!! !!}: escaped values and plain-text mail views are fine, raw HTML views are not', async () => {
+  const found = await scan({
+    'resources/views/post.blade.php': '{!! $post->body !!}\n{!! e($post->title) !!}\n{!! nl2br(e($post->excerpt)) !!}\n{!! Purifier::clean($post->html) !!}\n',
+    'resources/views/mail/document.blade.php': '<p>{!! $paragraph !!}</p>\n',
+    'resources/views/mail/document-text.blade.php': '{!! $tenant->name !!}\n{!! $paragraph !!}\n',
+    'app/Mail/DocumentMail.php': "<?php\nreturn new Content(view: 'mail.document', text: 'mail.document-text');\n",
+  }, scanCode);
+  assert.deepEqual(found.filter((f) => f.id === 'blade-unescaped').map((f) => f.location).sort(),
+    ['resources/views/mail/document.blade.php:1', 'resources/views/post.blade.php:1']);
+});
+
 test('innerHTML: variables are flagged, literals and ALL_CAPS constants are not', async () => {
   const found = await scan({
     'public/widget.js': [

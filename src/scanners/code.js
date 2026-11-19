@@ -1,6 +1,7 @@
 import { finding } from '../findings.js';
 import { isTestPath, snippet } from '../files.js';
 import { analyzeProject, SINKS } from '../taint.js';
+import { analyzePhpProject, PHP_SINKS } from '../taint-php.js';
 
 const SCANNER = 'code';
 
@@ -84,7 +85,8 @@ const RULES = [
     re: /::(?:create|update|fill|forceCreate)\s*\(\s*\$request->all\(\)|->(?:update|fill)\s*\(\s*\$request->all\(\)/,
     fix: 'Pass $request->validated() (or $request->only([...])) instead.' },
   { id: 'blade-unescaped', lang: BLADE, severity: 'low', title: 'Unescaped Blade output {!! !!}',
-    re: /\{!!\s*(?!\s*(?:csrf_field|method_field|\$\w+->links|\$slot|\$attributes)\b)/,
+    // Allowed: Laravel helpers that output safe HTML, and values escaped first (e(), nl2br(e()), a purifier).
+    re: /\{!!\s*(?!\s*(?:(?:csrf_field|method_field|\$\w+->links|\$slot|\$attributes)\b|e\(|nl2br\(\s*e\(|htmlspecialchars\(|clean\(|Purifier::clean\())/,
     fix: 'Use {{ }} unless the HTML is trusted or sanitized (e.g. with HTMLPurifier).' },
 
   // ── Python ──────────────────────────────────────────────────────────
@@ -102,10 +104,12 @@ const RULES = [
 
 export function scanCode(files) {
   const findings = [];
-  const taint = projectTaint(files);
+  const taint = new Map([...projectTaint(files), ...projectTaintPhp(files)]);
+  const textViews = plainTextMailViews(files);
   for (const file of files) {
     if (isTestPath(file.rel)) continue;
-    const rules = RULES.filter((r) => r.lang.test(file.name));
+    // {!! !!} in a plain-text email is correct: escaping would print &amp; to the reader
+    const rules = RULES.filter((r) => r.lang.test(file.name) && !(r.id === 'blade-unescaped' && textViews.has(file.rel)));
     if (!rules.length) continue;
 
     const lines = file.text.split(/\r?\n/);
@@ -139,11 +143,38 @@ function projectTaint(files) {
   }
 }
 
+/**
+ * Blade views a Mailable sends as its plain-text part:
+ *   new Content(view: 'mail.doc', text: 'mail.doc-text')   ->text('emails.welcome_plain')   'text' => 'mail.x'
+ * Returns the set of their paths (resources/views/mail/doc-text.blade.php).
+ */
+function plainTextMailViews(files) {
+  const views = new Set();
+  for (const f of files) {
+    if (!PHP.test(f.name) || BLADE.test(f.name)) continue;
+    for (const m of f.text.matchAll(/(?:\btext\s*:\s*|->text\(\s*|['"]text['"]\s*=>\s*)['"]([\w.\-/]{1,120})['"]/g)) {
+      views.add(`resources/views/${m[1].replace(/\./g, '/')}.blade.php`);
+    }
+  }
+  return views;
+}
+
+/** PHP files (not Blade templates) analysed together: methods resolve across controllers and services. */
+function projectTaintPhp(files) {
+  const php = files.filter((f) => PHP.test(f.name) && !BLADE.test(f.name) && !isTestPath(f.rel) && !f.text.split('\n').some((l) => l.length > 5000));
+  try {
+    return analyzePhpProject(php.map((f) => ({ rel: f.rel, text: f.text })));
+  } catch {
+    return new Map();
+  }
+}
+
 /** Flows found by taint tracking: across lines, through helpers, across files. */
 function taintFindings(file, lines, flagged, results) {
   const out = [];
+  const table = PHP.test(file.name) ? PHP_SINKS : SINKS;
   for (const r of results) {
-    const sink = SINKS[r.sink];
+    const sink = table[r.sink];
     const line = lines[r.line - 1] ?? '';
     if (line.includes('tameng-ignore') || flagged.has(`${sink.id}:${r.line}`)) continue;
     flagged.add(`${sink.id}:${r.line}`);
